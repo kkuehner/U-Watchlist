@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Detailed Analysis</title>
+<style>
+  body { font-family: sans-serif; max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
+  a { color: #06c; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2.5rem; }
+  table { border-collapse: collapse; width: 100%; margin-top: 0.75rem; }
+  th, td { border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: right; }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+  th { background: #f2f2f2; }
+  .estimate { font-style: italic; color: #555; }
+  .warn { color: #b00; font-style: italic; }
+  .stock-block { margin-top: 2.5rem; }
+  .kpi-editor { display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; align-items: center;
+    margin-top: 1rem; font-size: 0.9rem; background: #fafafa; border: 1px solid #eee; padding: 0.6rem 0.8rem; }
+  .kpi-toggle { display: flex; align-items: center; gap: 0.35rem; }
+  .kpi-toggle input[type=range] { width: 90px; }
+  .rank { color: #888; font-weight: bold; width: 2rem; }
+  #funnel-bar { position: sticky; bottom: 0; display: none; align-items: center; gap: 1rem;
+    margin-top: 1.5rem; padding: 0.7rem 1rem; background: #222; color: white; border-radius: 6px; }
+  #funnel-bar button { padding: 0.4rem 0.9rem; }
+</style>
+</head>
+<body>
+
+<p><a href="index.html">&larr; Back to Watchlist</a></p>
+<h1>Detailed Analysis</h1>
+
+<div class="kpi-editor" id="kpi-editor" style="display:none;"></div>
+<table id="summary-table" style="display:none;">
+  <thead id="summary-head"></thead>
+  <tbody id="summary-body"></tbody>
+</table>
+
+<div id="funnel-bar">
+  <span id="funnel-count"></span>
+  <button type="button" id="funnel-go">Decision metrics &rarr;</button>
+  <button type="button" id="funnel-clear">Clear</button>
+</div>
+
+<div id="details-container"></div>
+
+<script>
+  // --- Same building blocks as index.html (safeFixed/sentinel/color scale) - duplicated
+  // rather than shared, since these are two independent static pages with no build step
+  // to share JS modules between them. Keep them in sync by hand if the logic changes.
+  function safeFixed(value, decimals) {
+    return (typeof value === 'number' && isFinite(value)) ? value.toFixed(decimals) : 'N/A';
+  }
+  function sentinel(value, label) {
+    return value === -1 ? label : null;
+  }
+  function isComparable(value) {
+    return typeof value === 'number' && isFinite(value) && value !== -1;
+  }
+  function formatPercent(v) {
+    return sentinel(v, 'N/A') ?? (safeFixed(v * 100, 1) + '%');
+  }
+  function formatMarketCap(v) {
+    if (typeof v !== 'number' || !isFinite(v)) return 'N/A';
+    if (v >= 1e12) return (v / 1e12).toFixed(2) + 'T';
+    if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+    if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+    return v.toFixed(0);
+  }
+
+  const SUMMARY_KPIS = {
+    pe:              { label: 'P/E',         direction: 'low',  format: v => sentinel(v, 'Loss') ?? safeFixed(v, 2) },
+    rule40:          { label: 'Rule of 40',  direction: 'high', format: v => sentinel(v, 'N/A') ?? safeFixed(v, 1) },
+    avgProfitMargin: { label: 'Margin',      direction: 'high', format: formatPercent },
+    cagr:            { label: 'CAGR',        direction: 'high', format: formatPercent },
+    revenueCagr:     { label: 'R-CAGR',      direction: 'high', format: formatPercent },
+    pegCagr:         { label: 'PEG (CAGR)',  direction: 'low',  format: v => sentinel(v, 'N/A') ?? safeFixed(v, 2) },
+    cagrEstimate:    { label: 'CAGRe',       direction: 'high', format: formatPercent },
+    pegEstimate:     { label: 'PEGe',        direction: 'low',  format: v => sentinel(v, 'N/A') ?? safeFixed(v, 2) },
+  };
+
+  const GREEN = [99, 190, 123], YELLOW = [255, 235, 132], RED = [248, 105, 107];
+  function lerpColor(c1, c2, t) {
+    return `rgb(${c1.map((c, i) => Math.round(c + (c2[i] - c) * t)).join(',')})`;
+  }
+  function buildColorScale(kpi, stocks) {
+    const values = stocks.map(s => s[kpi]).filter(isComparable);
+    if (values.length < 2) return () => '';
+    values.sort((a, b) => a - b);
+    const min = values[0], max = values[values.length - 1];
+    const mid = values.length / 2;
+    const median = values.length % 2 === 0 ? (values[mid - 1] + values[mid]) / 2 : values[Math.floor(mid)];
+    if (min === max) return () => '';
+    const lowColor = SUMMARY_KPIS[kpi].direction === 'low' ? GREEN : RED;
+    const highColor = SUMMARY_KPIS[kpi].direction === 'low' ? RED : GREEN;
+    return (value) => {
+      if (!isComparable(value)) return '';
+      if (value <= median) {
+        const t = median === min ? 0 : (value - min) / (median - min);
+        return lerpColor(lowColor, YELLOW, t);
+      }
+      const t = max === median ? 1 : (value - median) / (max - median);
+      return lerpColor(YELLOW, highColor, t);
+    };
+  }
+
+  // --- Score/weighting: same idea as the watchlist's category ranking, but purely
+  // in-memory here - this page is a one-off "funnel" view of whatever was selected,
+  // not a saved thing, so there's nothing to persist to the backend.
+  const weights = Object.fromEntries(Object.keys(SUMMARY_KPIS).map(k => [k, 5])); // all on by default
+
+  function kpiEditorHtml() {
+    return Object.keys(SUMMARY_KPIS).map(kpi => {
+      const enabled = kpi in weights;
+      return `
+        <label class="kpi-toggle">
+          <input type="checkbox" data-kpi-toggle="${kpi}" ${enabled ? 'checked' : ''}>
+          ${SUMMARY_KPIS[kpi].label}
+          <input type="range" min="0" max="10" value="${weights[kpi] ?? 5}" data-kpi-weight="${kpi}"
+                 style="display:${enabled ? 'inline-block' : 'none'}">
+        </label>
+      `;
+    }).join('');
+  }
+
+  // Normalizes each active KPI to a 0-1 "how good is this value" score within the
+  // current selection (respecting direction), then combines them using the slider
+  // weights - identical math to computeScore/buildScorers on the watchlist page.
+  function buildScorers(kpis, stocks) {
+    const scorers = {};
+    for (const kpi of kpis) {
+      const values = stocks.map(s => s[kpi]).filter(isComparable);
+      if (values.length < 2) { scorers[kpi] = () => 0; continue; }
+      const min = Math.min(...values), max = Math.max(...values);
+      const direction = SUMMARY_KPIS[kpi].direction;
+      scorers[kpi] = (value) => {
+        if (!isComparable(value) || min === max) return 0;
+        const t = (value - min) / (max - min);
+        return direction === 'high' ? t : 1 - t;
+      };
+    }
+    return scorers;
+  }
+
+  function computeScore(stock, kpis, scorers) {
+    let totalWeight = 0, weightedSum = 0;
+    for (const kpi of kpis) {
+      const w = weights[kpi] ?? 0;
+      totalWeight += w;
+      weightedSum += w * scorers[kpi](stock[kpi]);
+    }
+    return totalWeight === 0 ? 0 : weightedSum / totalWeight;
+  }
+
+  // --- Page logic ---
+  const params = new URLSearchParams(window.location.search);
+  const symbols = (params.get('symbols') || '').split(',').filter(Boolean);
+  let latestAnalyses = []; // cached so toggling a KPI/weight can re-render without re-fetching
+
+  function renderSummaryTable(analyses) {
+    const ok = analyses.filter(a => !a.error);
+    const kpis = Object.keys(SUMMARY_KPIS).filter(k => k in weights);
+    const colorScales = Object.fromEntries(kpis.map(k => [k, buildColorScale(k, ok)]));
+    const scorers = buildScorers(kpis, ok);
+
+    const ranked = ok
+      .map(a => ({ ...a, score: computeScore(a, kpis, scorers) }))
+      .sort((a, b) => b.score - a.score);
+
+    document.querySelector('#kpi-editor').style.display = ok.length ? 'flex' : 'none';
+    document.querySelector('#kpi-editor').innerHTML = kpiEditorHtml();
+
+    document.querySelector('#summary-table').style.display = ok.length ? '' : 'none';
+    document.querySelector('#summary-head').innerHTML = `
+      <tr>
+        <th></th><th></th><th>Symbol</th><th>Name</th><th>Market Cap</th>
+        ${kpis.map(k => `<th>${SUMMARY_KPIS[k].label}</th>`).join('')}
+        <th>Score</th>
+      </tr>
+    `;
+    document.querySelector('#summary-body').innerHTML = ranked.map((a, i) => `
+      <tr>
+        <td><input type="checkbox" data-select="${a.symbol}" ${selectedSymbols.has(a.symbol) ? 'checked' : ''}></td>
+        <td class="rank">${i + 1}</td>
+        <td>${a.symbol}</td>
+        <td>${a.name ?? ''}</td>
+        <td>${formatMarketCap(a.marketCap)}</td>
+        ${kpis.map(kpi => `
+          <td style="background:${colorScales[kpi](a[kpi])}">${SUMMARY_KPIS[kpi].format(a[kpi])}</td>
+        `).join('')}
+        <td>${(a.score * 100).toFixed(0)}</td>
+      </tr>
+    `).join('');
+    renderFunnelBar();
+  }
+
+  // --- Funnel: same idea as the watchlist's selection bar - pick a subset of what's
+  // already being analyzed and carry it forward to the decision page.
+  const selectedSymbols = new Set();
+
+  function renderFunnelBar() {
+    const bar = document.querySelector('#funnel-bar');
+    bar.style.display = selectedSymbols.size > 0 ? 'flex' : 'none';
+    document.querySelector('#funnel-count').textContent =
+      `${selectedSymbols.size} selected: ${[...selectedSymbols].join(', ')}`;
+  }
+
+  document.querySelector('#summary-body').closest('table').addEventListener('change', (e) => {
+    if (!e.target.dataset.select) return;
+    if (e.target.checked) selectedSymbols.add(e.target.dataset.select);
+    else selectedSymbols.delete(e.target.dataset.select);
+    renderFunnelBar();
+  });
+
+  document.querySelector('#funnel-go').addEventListener('click', () => {
+    window.location.href = `decision.html?symbols=${encodeURIComponent([...selectedSymbols].join(','))}`;
+  });
+
+  document.querySelector('#funnel-clear').addEventListener('click', () => {
+    selectedSymbols.clear();
+    renderSummaryTable(latestAnalyses);
+  });
+
+  function renderStockDetail(a) {
+    if (a.error) {
+      return `<div class="stock-block"><h2>${a.symbol}</h2><p class="warn">${a.error}</p></div>`;
+    }
+    // history is newest-first actuals; estimates is oldest-first (current year, then next).
+    // Concatenating gives one clean newest-to-furthest-future timeline for display.
+    const rows = [...a.history, ...a.estimates].map(row => {
+      const isEstimate = 'epsEstimate' in row;
+      const revenue = isEstimate ? row.revenueEstimate : row.revenue;
+      const income = isEstimate ? null : row.netIncome; // no net-income estimate - see EarningsEstimate javadoc
+      const eps = isEstimate ? row.epsEstimate : null;
+      return `
+        <tr class="${isEstimate ? 'estimate' : ''}">
+          <td>${row.fiscalYear}${isEstimate ? 'e' : ''}</td>
+          <td>${formatMarketCap(revenue)}</td>
+          <td>${income !== null ? formatMarketCap(income) : '&mdash;'}</td>
+          <td>${eps !== null ? eps.toFixed(2) : '&mdash;'}</td>
+        </tr>
+      `;
+    }).join('');
+
+    return `
+      <div class="stock-block">
+        <h2>${a.symbol} &mdash; ${a.name ?? ''}</h2>
+        <table>
+          <thead><tr><th>Fiscal Year</th><th>Revenue</th><th>Net Income</th><th>EPS (estimate years only)</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  async function load() {
+    if (symbols.length === 0) {
+      document.querySelector('#details-container').innerHTML = '<p>No symbols selected - go back and check some boxes first.</p>';
+      return;
+    }
+    latestAnalyses = await Promise.all(symbols.map(async (symbol) => {
+      try {
+        const res = await fetch(`/analysis/${symbol}`);
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          return { symbol, error: body.error || 'Failed to load' };
+        }
+        return await res.json();
+      } catch (err) {
+        return { symbol, error: err.message };
+      }
+    }));
+
+    renderSummaryTable(latestAnalyses);
+    document.querySelector('#details-container').innerHTML = latestAnalyses.map(renderStockDetail).join('');
+  }
+
+  // Delegated listeners on the KPI editor - it's rebuilt on every render, so a
+  // listener attached to individual checkboxes/sliders would be lost each time.
+  document.querySelector('#kpi-editor').addEventListener('change', (e) => {
+    if (!e.target.dataset.kpiToggle) return;
+    const kpi = e.target.dataset.kpiToggle;
+    if (e.target.checked) weights[kpi] = 5;
+    else delete weights[kpi];
+    renderSummaryTable(latestAnalyses);
+  });
+
+  document.querySelector('#kpi-editor').addEventListener('input', (e) => {
+    if (!e.target.dataset.kpiWeight) return;
+    weights[e.target.dataset.kpiWeight] = Number(e.target.value);
+    renderSummaryTable(latestAnalyses);
+  });
+
+  load();
+</script>
+
+</body>
+</html>

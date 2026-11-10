@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Investment Decision</title>
+<style>
+  body { font-family: sans-serif; max-width: 1300px; margin: 2rem auto; padding: 0 1rem; }
+  a { color: #06c; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2.5rem; }
+  table { border-collapse: collapse; width: 100%; margin-top: 0.75rem; }
+  th, td { border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: right; }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+  th { background: #f2f2f2; }
+  .warn { color: #b00; font-style: italic; }
+  .rank { color: #888; font-weight: bold; width: 2rem; }
+  .kpi-editor { display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; align-items: center;
+    margin-top: 1rem; font-size: 0.9rem; background: #fafafa; border: 1px solid #eee; padding: 0.6rem 0.8rem; }
+  .kpi-toggle { display: flex; align-items: center; gap: 0.35rem; }
+  .kpi-toggle input[type=range] { width: 90px; }
+  .dcf-assumptions { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: center;
+    margin-top: 1rem; font-size: 0.9rem; background: #eef6ff; border: 1px solid #cde; padding: 0.6rem 0.8rem; }
+  .dcf-assumptions label { display: flex; align-items: center; gap: 0.4rem; }
+  .dcf-assumptions input[type=range] { width: 120px; }
+</style>
+</head>
+<body>
+
+<p><a href="index.html">&larr; Back to Watchlist</a></p>
+<h1>Investment Decision</h1>
+<p style="font-size:0.9rem; color:#666;">Graham Number, DCF, and leverage-vs-earnings checks - extends the analysis view with the "Entscheid" sheet's valuation metrics.</p>
+
+<div class="dcf-assumptions" id="dcf-assumptions" style="display:none;">
+  <strong>DCF assumptions</strong>
+  <label>Discount rate <input type="range" id="discount-rate" min="4" max="20" value="10" step="0.5"> <span id="discount-rate-val"></span></label>
+  <label>Terminal growth <input type="range" id="terminal-growth" min="0" max="5" value="2.5" step="0.25"> <span id="terminal-growth-val"></span></label>
+  <span style="color:#666;">Per-stock growth rate for the 5-year projection defaults to that stock's CAGRe (or trailing CAGR if no analyst estimate).</span>
+</div>
+
+<div class="kpi-editor" id="kpi-editor" style="display:none;"></div>
+<table id="summary-table" style="display:none;">
+  <thead id="summary-head"></thead>
+  <tbody id="summary-body"></tbody>
+</table>
+
+<div id="error-container"></div>
+
+<script>
+  // --- Same building blocks as analysis.html/index.html - duplicated for the same
+  // reason: independent static pages, no shared JS module setup in this project.
+  function safeFixed(value, decimals) {
+    return (typeof value === 'number' && isFinite(value)) ? value.toFixed(decimals) : 'N/A';
+  }
+  function sentinel(value, label) {
+    return value === -1 ? label : null;
+  }
+  function isComparable(value) {
+    return typeof value === 'number' && isFinite(value) && value !== -1;
+  }
+  function formatPercent(v) {
+    return sentinel(v, 'N/A') ?? (safeFixed(v * 100, 1) + '%');
+  }
+  function formatMarketCap(v) {
+    if (typeof v !== 'number' || !isFinite(v)) return 'N/A';
+    if (v >= 1e12) return (v / 1e12).toFixed(2) + 'T';
+    if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+    if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+    return v.toFixed(0);
+  }
+
+  // The full combined column set: analysis metrics (already known from the previous
+  // page) plus the new decision metrics, plus the DCF result computed client-side below.
+  const ALL_KPIS = {
+    pe:              { label: 'P/E',          direction: 'low',  format: v => sentinel(v, 'Loss') ?? safeFixed(v, 2) },
+    rule40:          { label: 'Rule of 40',   direction: 'high', format: v => sentinel(v, 'N/A') ?? safeFixed(v, 1) },
+    avgProfitMargin: { label: 'Margin',       direction: 'high', format: formatPercent },
+    cagr:            { label: 'CAGR',         direction: 'high', format: formatPercent },
+    revenueCagr:     { label: 'R-CAGR',       direction: 'high', format: formatPercent },
+    pegCagr:         { label: 'PEG (CAGR)',   direction: 'low',  format: v => sentinel(v, 'N/A') ?? safeFixed(v, 2) },
+    cagrEstimate:    { label: 'CAGRe',        direction: 'high', format: formatPercent },
+    pegEstimate:     { label: 'PEGe',         direction: 'low',  format: v => sentinel(v, 'N/A') ?? safeFixed(v, 2) },
+    debtToEarnings:  { label: 'FK/Gewinn',    direction: 'low',  format: v => sentinel(v, 'N/A') ?? safeFixed(v, 2) },
+    debtRatio:       { label: 'Verschuld.',   direction: 'low',  format: v => sentinel(v, 'Neg. Equity') ?? safeFixed(v, 2) },
+    grahamVsPrice:   { label: 'vs. Graham',   direction: 'high', format: v => sentinel(v, 'N/A') ?? formatPercent(v) },
+    dcfVsPrice:      { label: 'vs. DCF',      direction: 'high', format: v => sentinel(v, 'N/A') ?? formatPercent(v) },
+    yearsToDouble:   { label: 'Years to 2x',  direction: 'low',  format: v => sentinel(v, 'N/A') ?? safeFixed(v, 1) },
+  };
+  // What's on by default - the analysis metrics were already the focus of the previous
+  // page, so start this one focused on the new decision metrics instead. Anything can
+  // still be switched on via the KPI editor.
+  const DEFAULT_ON = ['debtToEarnings', 'debtRatio', 'grahamVsPrice', 'dcfVsPrice', 'yearsToDouble'];
+
+  const GREEN = [99, 190, 123], YELLOW = [255, 235, 132], RED = [248, 105, 107];
+  function lerpColor(c1, c2, t) {
+    return `rgb(${c1.map((c, i) => Math.round(c + (c2[i] - c) * t)).join(',')})`;
+  }
+  function buildColorScale(kpi, stocks) {
+    const values = stocks.map(s => s[kpi]).filter(isComparable);
+    if (values.length < 2) return () => '';
+    values.sort((a, b) => a - b);
+    const min = values[0], max = values[values.length - 1];
+    const mid = values.length / 2;
+    const median = values.length % 2 === 0 ? (values[mid - 1] + values[mid]) / 2 : values[Math.floor(mid)];
+    if (min === max) return () => '';
+    const lowColor = ALL_KPIS[kpi].direction === 'low' ? GREEN : RED;
+    const highColor = ALL_KPIS[kpi].direction === 'low' ? RED : GREEN;
+    return (value) => {
+      if (!isComparable(value)) return '';
+      if (value <= median) {
+        const t = median === min ? 0 : (value - min) / (median - min);
+        return lerpColor(lowColor, YELLOW, t);
+      }
+      const t = max === median ? 1 : (value - median) / (max - median);
+      return lerpColor(YELLOW, highColor, t);
+    };
+  }
+
+  const weights = Object.fromEntries(DEFAULT_ON.map(k => [k, 5]));
+
+  function kpiEditorHtml() {
+    return Object.keys(ALL_KPIS).map(kpi => {
+      const enabled = kpi in weights;
+      return `
+        <label class="kpi-toggle">
+          <input type="checkbox" data-kpi-toggle="${kpi}" ${enabled ? 'checked' : ''}>
+          ${ALL_KPIS[kpi].label}
+          <input type="range" min="0" max="10" value="${weights[kpi] ?? 5}" data-kpi-weight="${kpi}"
+                 style="display:${enabled ? 'inline-block' : 'none'}">
+        </label>
+      `;
+    }).join('');
+  }
+
+  function buildScorers(kpis, stocks) {
+    const scorers = {};
+    for (const kpi of kpis) {
+      const values = stocks.map(s => s[kpi]).filter(isComparable);
+      if (values.length < 2) { scorers[kpi] = () => 0; continue; }
+      const min = Math.min(...values), max = Math.max(...values);
+      const direction = ALL_KPIS[kpi].direction;
+      scorers[kpi] = (value) => {
+        if (!isComparable(value) || min === max) return 0;
+        const t = (value - min) / (max - min);
+        return direction === 'high' ? t : 1 - t;
+      };
+    }
+    return scorers;
+  }
+
+  function computeScore(stock, kpis, scorers) {
+    let totalWeight = 0, weightedSum = 0;
+    for (const kpi of kpis) {
+      const w = weights[kpi] ?? 0;
+      totalWeight += w;
+      weightedSum += w * scorers[kpi](stock[kpi]);
+    }
+    return totalWeight === 0 ? 0 : weightedSum / totalWeight;
+  }
+
+  // --- DCF: computed here (not on the backend) so dragging a slider recalculates
+  // instantly with no network round-trip. Standard 5-year explicit projection + Gordon
+  // Growth terminal value, then enterprise value -> equity value via cash/debt.
+  // This is a simplified model (flat growth rate for all 5 years, not tapering toward
+  // the terminal rate) - a deliberate scope cut, not an oversight; the sliders let you
+  // explore how sensitive the result is to the assumptions instead.
+  function calcDcfPerShare(stock, discountRate, terminalGrowth, years = 5) {
+    const fcf0 = stock.freeCashFlow;
+    const g = stock.suggestedGrowthRate;
+    if (fcf0 <= 0 || g <= 0 || discountRate <= terminalGrowth) return -1;
+
+    let fcfT = fcf0, presentValueSum = 0;
+    for (let t = 1; t <= years; t++) {
+      fcfT *= (1 + g);
+      presentValueSum += fcfT / Math.pow(1 + discountRate, t);
+    }
+    const terminalValue = fcfT * (1 + terminalGrowth) / (discountRate - terminalGrowth);
+    const presentValueOfTerminal = terminalValue / Math.pow(1 + discountRate, years);
+    const enterpriseValue = presentValueSum + presentValueOfTerminal;
+    const equityValue = enterpriseValue - stock.totalDebt + stock.cash;
+    return equityValue / stock.impliedShares;
+  }
+
+  function applyDcf(stocks) {
+    const discountRate = Number(document.querySelector('#discount-rate').value) / 100;
+    const terminalGrowth = Number(document.querySelector('#terminal-growth').value) / 100;
+    for (const s of stocks) {
+      if (s.error) continue;
+      s.dcfValue = calcDcfPerShare(s, discountRate, terminalGrowth);
+      s.dcfVsPrice = s.dcfValue > 0 ? (s.dcfValue - s.price) / s.price : -1;
+    }
+  }
+
+  // --- Page logic ---
+  const params = new URLSearchParams(window.location.search);
+  const symbols = (params.get('symbols') || '').split(',').filter(Boolean);
+  let latestStocks = [];
+
+  function renderSummaryTable() {
+    applyDcf(latestStocks);
+    const ok = latestStocks.filter(s => !s.error);
+    const kpis = Object.keys(ALL_KPIS).filter(k => k in weights);
+    const colorScales = Object.fromEntries(kpis.map(k => [k, buildColorScale(k, ok)]));
+    const scorers = buildScorers(kpis, ok);
+
+    const ranked = ok
+      .map(s => ({ ...s, score: computeScore(s, kpis, scorers) }))
+      .sort((a, b) => b.score - a.score);
+
+    document.querySelector('#dcf-assumptions').style.display = ok.length ? 'flex' : 'none';
+    document.querySelector('#discount-rate-val').textContent = document.querySelector('#discount-rate').value + '%';
+    document.querySelector('#terminal-growth-val').textContent = document.querySelector('#terminal-growth').value + '%';
+
+    document.querySelector('#kpi-editor').style.display = ok.length ? 'flex' : 'none';
+    document.querySelector('#kpi-editor').innerHTML = kpiEditorHtml();
+
+    document.querySelector('#summary-table').style.display = ok.length ? '' : 'none';
+    document.querySelector('#summary-head').innerHTML = `
+      <tr>
+        <th></th><th>Symbol</th><th>Name</th><th>Market Cap</th>
+        ${kpis.map(k => `<th>${ALL_KPIS[k].label}</th>`).join('')}
+        <th>Score</th>
+      </tr>
+    `;
+    document.querySelector('#summary-body').innerHTML = ranked.map((s, i) => `
+      <tr>
+        <td class="rank">${i + 1}</td>
+        <td>${s.symbol}</td>
+        <td>${s.name ?? ''}</td>
+        <td>${formatMarketCap(s.marketCap)}</td>
+        ${kpis.map(kpi => `
+          <td style="background:${colorScales[kpi](s[kpi])}">${ALL_KPIS[kpi].format(s[kpi])}</td>
+        `).join('')}
+        <td>${(s.score * 100).toFixed(0)}</td>
+      </tr>
+    `).join('');
+
+    const errored = latestStocks.filter(s => s.error);
+    document.querySelector('#error-container').innerHTML = errored.map(s =>
+      `<p class="warn">${s.symbol}: ${s.error}</p>`
+    ).join('');
+  }
+
+  async function load() {
+    if (symbols.length === 0) {
+      document.querySelector('#error-container').innerHTML = '<p>No symbols selected - go back and check some boxes first.</p>';
+      return;
+    }
+    latestStocks = await Promise.all(symbols.map(async (symbol) => {
+      try {
+        const [analysisRes, decisionRes] = await Promise.all([
+          fetch(`/analysis/${symbol}`),
+          fetch(`/decision/${symbol}`),
+        ]);
+        if (!analysisRes.ok || !decisionRes.ok) {
+          const failed = !analysisRes.ok ? analysisRes : decisionRes;
+          const body = await failed.json().catch(() => ({}));
+          return { symbol, error: body.error || 'Failed to load' };
+        }
+        // Merge both responses into one flat object per stock - the two endpoints
+        // don't share field names, so this is a plain spread, no conflicts to resolve.
+        return { ...(await analysisRes.json()), ...(await decisionRes.json()) };
+      } catch (err) {
+        return { symbol, error: err.message };
+      }
+    }));
+    renderSummaryTable();
+  }
+
+  document.querySelector('#kpi-editor').addEventListener('change', (e) => {
+    if (!e.target.dataset.kpiToggle) return;
+    const kpi = e.target.dataset.kpiToggle;
+    if (e.target.checked) weights[kpi] = 5;
+    else delete weights[kpi];
+    renderSummaryTable();
+  });
+  document.querySelector('#kpi-editor').addEventListener('input', (e) => {
+    if (!e.target.dataset.kpiWeight) return;
+    weights[e.target.dataset.kpiWeight] = Number(e.target.value);
+    renderSummaryTable();
+  });
+  document.querySelector('#discount-rate').addEventListener('input', renderSummaryTable);
+  document.querySelector('#terminal-growth').addEventListener('input', renderSummaryTable);
+
+  load();
+</script>
+
+</body>
+</html>

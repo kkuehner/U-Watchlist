@@ -1,0 +1,51 @@
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.2)
+
+2026-08-29T16:21:00.015+02:00  INFO 28212 --- [Investment-App] [           main] c.e.Investment.InvestmentAppApplication  : Starting InvestmentAppApplication using Java 25.0.2 with PID 28212 (C:\Users\kolja\Desktop\Investment\Investment\target\classes started by kolja in C:\Users\kolja\Desktop\Investment\Investment)
+2026-08-29T16:21:00.018+02:00  INFO 28212 --- [Investment-App] [           main] c.e.Investment.InvestmentAppApplication  : The following 1 profile is active: "local"
+2026-08-29T16:21:00.591+02:00  INFO 28212 --- [Investment-App] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-08-29T16:21:00.638+02:00  INFO 28212 --- [Investment-App] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 39 ms. Found 2 JPA repository interfaces.
+2026-08-29T16:21:01.012+02:00  INFO 28212 --- [Investment-App] [           main] o.s.boot.tomcat.TomcatWebServer          : Tomcat initialized with port 8080 (http)
+2026-08-29T16:21:01.023+02:00  INFO 28212 --- [Investment-App] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-08-29T16:21:01.023+02:00  INFO 28212 --- [Investment-App] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/11.0.15]
+2026-08-29T16:21:01.067+02:00  INFO 28212 --- [Investment-App] [           main] b.w.c.s.WebApplicationContextInitializer : Root WebApplicationContext: initialization completed in 1008 ms
+2026-08-29T16:21:01.233+02:00  INFO 28212 --- [Investment-App] [           main] org.hibernate.orm.jpa                    : HHH008540: Processing PersistenceUnitInfo [name: default]
+2026-08-29T16:21:01.273+02:00  INFO 28212 --- [Investment-App] [           main] org.hibernate.orm.core                   : HHH000001: Hibernate ORM core version 7.2.1.Final
+2026-08-29T16:21:01.635+02:00  INFO 28212 --- [Investment-App] [           main] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-08-29T16:21:01.660+02:00  INFO 28212 --- [Investment-App] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-08-29T16:21:01.823+02:00  INFO 28212 --- [Investment-App] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection conn0: url=jdbc:h2:file:./data/investment user=
+2026-08-29T16:21:01.824+02:00  INFO 28212 --- [Investment-App] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-08-29T16:21:01.869+02:00  INFO 28212 --- [Investment-App] [           main] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+	Database JDBC URL [jdbc:h2:file:./data/investment]
+	Database driver: H2 JDBC Driver
+	Database dialect: H2Dialect
+	Database version: 2.4.240
+	Default catalog/schema: INVESTMENT/PUBLIC
+	Autocommit mode: undefined/unknown
+	Isolation level: READ_COMMITTED [default READ_COMMITTED]
+	JDBC fetch size: 100
+	Pool: DataSourceConnectionProvider
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2026-08-29T16:21:02.545+02:00  INFO 28212 --- [Investment-App] [           main] org.hibernate.orm.core                   : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-08-29T16:21:02.587+02:00  INFO 28212 --- [Investment-App] [           main] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-08-29T16:21:02.644+02:00  INFO 28212 --- [Investment-App] [           main] o.s.d.j.r.query.QueryEnhancerFactories   : Hibernate is in classpath; If applicable, HQL parser will be used.
+2026-08-29T16:21:02.822+02:00  WARN 28212 --- [Investment-App] [           main] JpaBaseConfiguration$JpaWebConfiguration : spring.jpa.open-in-view is enabled by default. Therefore, database queries may be performed during view rendering. Explicitly configure spring.jpa.open-in-view to disable this warning
+2026-08-29T16:21:02.836+02:00  INFO 28212 --- [Investment-App] [           main] o.s.b.w.a.WelcomePageHandlerMapping      : Adding welcome page: class path resource [static/index.html]
+2026-08-29T16:21:03.104+02:00  INFO 28212 --- [Investment-App] [           main] o.s.b.a.e.web.EndpointLinksResolver      : Exposing 1 endpoint beneath base path '/actuator'
+2026-08-29T16:21:03.160+02:00  INFO 28212 --- [Investment-App] [           main] o.s.boot.tomcat.TomcatWebServer          : Tomcat started on port 8080 (http) with context path '/'
+2026-08-29T16:21:03.165+02:00  INFO 28212 --- [Investment-App] [           main] c.e.Investment.InvestmentAppApplication  : Started InvestmentAppApplication in 3.448 seconds (process running for 3.747)
+2026-08-29T16:21:09.397+02:00  INFO 28212 --- [Investment-App] [nio-8080-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-08-29T16:21:09.398+02:00  INFO 28212 --- [Investment-App] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-08-29T16:21:09.399+02:00  INFO 28212 --- [Investment-App] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 1 ms
+2026-08-29T16:49:57.948+02:00  WARN 28212 --- [Investment-App] [l-1:housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=18m55s933ms302µs100ns).
+2026-08-29T17:10:34.260+02:00  WARN 28212 --- [Investment-App] [l-1:housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=4m6s286ms93µs700ns).
+2026-08-29T21:11:04.001+02:00  WARN 28212 --- [Investment-App] [l-1:housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=4h29s741ms857µs100ns).
+2026-08-29T22:39:57.316+02:00  WARN 28212 --- [Investment-App] [l-1:housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=1h28m56s799ms117µs400ns).
